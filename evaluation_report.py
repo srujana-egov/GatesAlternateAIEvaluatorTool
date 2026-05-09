@@ -41,6 +41,53 @@ limitations, and results from running that evaluator against the bot.
 
 st.divider()
 
+# ── Submission context ─────────────────────────────────────────────────────────
+
+col_path, col_ai = st.columns(2)
+
+with col_path:
+    st.subheader("Path chosen")
+    st.markdown("""
+The assignment began with Option A — attempting to install and run the CeRAI AIEvaluationTool
+against the DIGIT Studio Assistant. The Docker build failed before the image could start on an
+Apple Silicon (M2) laptop: `OSError: [Errno 5]` from ~3.5 GB of NVIDIA CUDA packages that
+target Linux x86-64 and are architecturally incompatible with aarch64.
+
+Investigating further revealed a more significant problem than portability. Reading the CeRAI
+source showed that its truthfulness and hallucination metrics evaluate responses against academic
+benchmark datasets — SQuAD, CODAH, HotPotQA, HaluQA — not the bot's actual knowledge base.
+A tool that claims to evaluate RAG systems but checks responses against Wikipedia passage
+comprehension produces scores that are meaningless for domain-specific deployments, regardless
+of whether it runs. That finding made Option B the right path: file the issues systematically,
+then implement an alternative that evaluates what the tool claims to evaluate — faithfulness to
+retrieved contexts, domain correctness, and safety — without requiring hardware the tool's own
+audience does not have.
+""")
+
+with col_ai:
+    st.subheader("AI use in completing this assignment")
+    st.markdown("""
+Claude Code was used throughout to navigate the decision and implementation.
+The starting point was a working RAG bot with known gaps — false rejections on in-domain
+topics, uncertainty about hallucination risk on capability questions — and an open question:
+does CeRAI address these better than DeepEval or RAGAS? Reading through the CeRAI source files
+together is where the benchmark-dataset finding emerged; the question "what does
+`truth_internal.py` actually test against?" led to the SQuAD/CODAH discovery that became
+the core of Issue #1.
+
+Multiple evaluation scripts were written and debugged iteratively. The DeepEval API changed
+between versions — GEval import paths, `evaluate()` vs `measure()`, `SingleTurnParams` enum
+for evaluation_params — and each failure was diagnosed and corrected in the session rather
+than by working around it. The session also served as a thinking partner for framing: deciding
+which roadblocks were environment-specific (Apple Silicon) versus fundamental design limitations,
+and sharpening issue descriptions so they applied to all teams using the tool, not only DIGIT's
+deployment context. The confirmed hallucination in `ds_lim_004` — caught by the
+`limitation_awareness` GEval and missed by generic faithfulness — was found during a live run
+in the session and then incorporated into the issue framing for Issue #3.
+""")
+
+st.divider()
+
 # ── Section 1: System Under Evaluation ────────────────────────────────────────
 
 st.header("1. System Under Evaluation")
