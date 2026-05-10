@@ -117,13 +117,13 @@ Results are saved to `results/deepeval_results_YYYYMMDD_HHMMSS.json`.
 
 Results from the full run are in [`results/deepeval_results_latest.json`](results/deepeval_results_latest.json).
 
-| Category | N | Keyword pass | LLM judge pass |
-|---|---|---|---|
-| in_domain | 29 | 22% | 77% |
-| limitation_awareness | 7 | 0% | 28% |
-| out_of_domain | 10 | 100% | 80% |
-| edge_case | 5 | 0% | 57% |
-| adversarial | 5 | 100% | 100% |
+| Category | N | Keyword pass | LLM judge pass | Notes |
+|---|---|---|---|---|
+| in_domain | 27 | 22% | 77% | 2 questions dropped — 500 server error |
+| limitation_awareness | 7 | 0% | 28% | |
+| out_of_domain | 5 | 100% | 80% | digit_studio use case only; hcm OOD not run |
+| edge_case | 5 | 0% | 57% | |
+| adversarial | 5 | 100% | 100% | |
 
 **Key findings:**
 - **Confirmed hallucination** (`ds_lim_004`): bot stated that published configurations can be edited. They cannot. LLM judge score: 0.0. A generic faithfulness metric missed this; the `limitation_awareness` GEval caught it.
