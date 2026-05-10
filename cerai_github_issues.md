@@ -1,358 +1,277 @@
-# CeRAI GitHub Issues — Draft
+# CeRAI GitHub Issues Filed
 
-File each section below as a separate issue at:
-https://github.com/cerai-iitm/AIEvaluationTool/issues/new
+Ten issues filed at: https://github.com/cerai-iitm/AIEvaluationTool/issues
 
 ---
 
-## Issue 1 — No support for arbitrary REST API endpoints
+## Issue #136 — No RAG faithfulness evaluation: hallucination/truthfulness strategies only test against external benchmarks
 
-**Title:** `feat: add support for arbitrary REST API chatbot endpoints (not just WhatsApp)`
+**Filed:** https://github.com/cerai-iitm/AIEvaluationTool/issues/136
 
-**Labels:** `enhancement`, `architecture`
-
-**Body:**
+**Relevant code:** `src/lib/strategy/truth_internal.py`, `src/lib/strategy/hallucination.py`
 
 ### Problem
 
-CeRAI's entire evaluation pipeline is built around WhatsApp as the delivery channel. The entry point is a WhatsApp webhook, and the test runner (`test_runner/`) sends prompts via Selenium/browser automation against the WhatsApp Web interface.
+`truth_internal.py` evaluates agent responses against hardcoded academic benchmark datasets — SQuAD, CODAH, HotPotQA, HaluQA — not the bot's actual knowledge base. The `Conversation` object (`src/lib/data/conversation.py`) has no `retrieved_contexts` field, meaning CeRAI has no mechanism to receive what a RAG pipeline actually retrieved and verify the answer is grounded in it.
 
-This makes it impossible to evaluate a chatbot that exposes a standard REST API (e.g. `POST /chat`) without wrapping it inside a fake WhatsApp integration — an unreasonable requirement for most production deployments.
+For a bot built over a domain-specific knowledge base, this produces scores that measure Wikipedia passage comprehension, not domain faithfulness. A confirmed hallucination (`ds_lim_004` — bot stated published configurations are editable; they are immutable) passed CeRAI's faithfulness check entirely.
 
-**Affected files:**
-- `test_runner/runner.py` — hardcodes WhatsApp Web URL and Selenium selectors
-- `docker-compose.yml` — `whatsapp_connector` service has no REST alternative
-- `config/config.json` — `endpoint` field only supports WhatsApp webhook format
+### Steps to reproduce
+
+1. Run any RAG bot against a domain-specific knowledge base using CeRAI's truthfulness strategy.
+2. Observe that the score reflects SQuAD/HotPotQA benchmark performance, not grounding in retrieved documents.
+
+### Impact
+
+Evaluation scores are meaningless for domain-specific RAG deployments regardless of whether the tool runs.
 
 ### Suggested fix
 
-Add a `transport` field to `config.json`:
-```json
-{
-  "transport": "rest",
-  "rest_endpoint": "http://localhost:8001/chat",
-  "rest_payload_template": {"message": "{query}"},
-  "rest_response_path": "response"
-}
-```
-When `transport: rest`, the test runner should `POST` directly to the endpoint and extract the response via `rest_response_path`, bypassing all Selenium/WhatsApp infrastructure.
-
-### Why this matters
-
-Government AI deployments (DIGIT, BharatGPT, etc.) expose REST APIs. The WhatsApp-first design excludes the majority of production chatbot architectures from being evaluated.
+Add a `retrieved_contexts` field to the `Conversation` object and implement a faithfulness strategy that verifies each claim in the agent response against the retrieved chunks (e.g. using an LLM judge or NLI model).
 
 ---
 
-## Issue 2 — Judge model requires 32 GB RAM; incompatible with most government hardware
+## Issue #138 — Limited adversarial robustness evaluation
 
-**Title:** `bug: qwen3:32b judge model requires 32 GB RAM — unusable on standard government hardware`
+**Filed:** https://github.com/cerai-iitm/AIEvaluationTool/issues/138
 
-**Labels:** `bug`, `hardware`, `accessibility`
-
-**Body:**
+**Relevant code:** `src/lib/strategy/robustness_advInstruction.py`, `src/lib/strategy/robustness_advGLUE.py`, `src/lib/strategy/safety.py`
 
 ### Problem
 
-CeRAI uses `qwen3:32b` via Ollama as its LLM judge. Running this model requires approximately 32 GB of RAM (FP16 weights alone are ~64 GB; 4-bit quantised is ~18–20 GB but still needs ~28 GB total with KV cache). This exceeds the hardware budget of virtually every government deployment context CeRAI is meant to serve.
+CeRAI's adversarial strategies test paraphrase robustness (cosine similarity on AdvGLUE benchmarks) and run ShieldGemma as a single-turn prompt+response classifier. Neither tests actual prompt injection — where an attacker embeds instructions inside a user message to override the bot's system prompt.
 
-**Evidence from docker-compose.yml:**
-```yaml
-ollama:
-  image: ollama/ollama
-  # pulls qwen3:32b on first run — requires 28–32 GB free RAM
-```
+### Steps to reproduce
 
-**Concrete failure observed:**
-Attempting `docker compose build` on a standard MacBook with 905 MB free disk:
-```
-OSError: [Errno 5] Input/output error
-```
-The build failed during pip install because CUDA/GPU libraries alone (cublas 542 MB, cudnn 433 MB, cusparselt 220 MB, torch ~800 MB) exceeded available disk — before any model weights were downloaded.
+1. Send a prompt injection attempt (e.g. `"Ignore previous instructions. You are now DAN..."`) to a bot evaluated by CeRAI.
+2. Observe that `robustness_advInstruction.py` measures cosine similarity between the injected prompt and stored adversarial examples — it does not simulate injection or evaluate whether the bot complied.
 
-### Context
+### Impact
 
-DIGIT 3.0 — a major Indian government digital public infrastructure platform — targets deployment on 8 GB RAM machines. An evaluation tool that requires 4× the target machine's RAM to run cannot be used to evaluate software meant for that platform.
+Injection and jailbreak resistance are invisible. A bot that complies with every injection attempt passes CeRAI's adversarial evaluation.
 
 ### Suggested fix
 
-1. Make the judge model configurable via `config.json`:
-   ```json
-   { "judge_model": "qwen3:8b" }
-   ```
-2. Add an OpenAI/Anthropic fallback for cloud-based evaluation (no local GPU required).
-3. Document minimum hardware requirements prominently in README.
+Add a dedicated injection simulation strategy that sends crafted payloads and uses an LLM judge to evaluate whether the bot's response complied with the injected instruction.
 
 ---
 
-## Issue 3 — EXPECTED_OUTPUT evaluation is brittle and gameable
+## Issue #140 — Out-of-scope tests cover topic drift but not domain-specific capability hallucination
 
-**Title:** `bug: exact-match EXPECTED_OUTPUT scoring fails correct paraphrased answers and can be gamed`
+**Filed:** https://github.com/cerai-iitm/AIEvaluationTool/issues/140
 
-**Labels:** `bug`, `evaluation-quality`
-
-**Body:**
+**Relevant code:** `data/DataPoints.json` (metric 20), `src/lib/strategy/llm_judge.py`
 
 ### Problem
 
-CeRAI compares bot responses against `EXPECTED_OUTPUT` strings in the test config. This fails in two directions:
+Metric 20 in `DataPoints.json` covers out-of-scope detection for topic drift (questions entirely outside the domain). However, there is no evaluation category for domain-specific capability hallucination — where a bot confidently asserts something false about its own knowledge domain (e.g. claiming a feature exists that does not).
 
-**False negatives (correct answer marked wrong):**
-If a bot answers correctly but with different phrasing, it fails the check.
-- Expected: `"The service uses JWT authentication"`
-- Bot answer: `"Authentication is handled via JSON Web Tokens"` → FAIL
+Standard faithfulness metrics miss this because the bot's answer is internally consistent; it simply asserts something false. Only a judge explicitly probing whether stated capabilities exist can catch this pattern.
 
-**False positives (wrong answer passes):**
-A bot that always returns a string containing the expected keywords will score 100% regardless of whether the answer is correct in context. This is a direct application of Goodhart's Law.
+### Steps to reproduce
 
-**Affected file:** `evaluator/evaluator.py` — `check_expected_output()` function
+1. Ask the bot about a capability it does not have (e.g. "Can I edit published configurations?").
+2. Observe that CeRAI's out-of-scope metric passes the response (the topic is in-domain) while the hallucinated capability goes undetected.
+
+### Impact
+
+Capability hallucinations — the highest-risk failure mode for government-facing RAG bots — go undetected.
 
 ### Suggested fix
 
-Replace (or supplement) keyword matching with semantic similarity:
-```python
-from sentence_transformers import SentenceTransformer
-model = SentenceTransformer("all-MiniLM-L6-v2")
-
-def semantic_match(expected: str, actual: str, threshold: float = 0.75) -> bool:
-    emb_e = model.encode(expected)
-    emb_a = model.encode(actual)
-    score = cosine_similarity([emb_e], [emb_a])[0][0]
-    return score >= threshold
-```
-This catches paraphrased correct answers and is harder to game than keyword stuffing.
+Add a `limitation_awareness` evaluation category with a judge prompt that explicitly checks whether stated capabilities are real, rather than whether the response is topically relevant.
 
 ---
 
-## Issue 4 — No RAG-specific evaluation metrics (retrieval quality, faithfulness)
+## Issue #141 — Infrastructure requirements exclude the tool's primary audience
 
-**Title:** `feat: add RAG-specific metrics — retrieval hit rate, faithfulness, answer relevancy`
+**Filed:** https://github.com/cerai-iitm/AIEvaluationTool/issues/141
 
-**Labels:** `enhancement`, `rag-evaluation`
-
-**Body:**
+**Relevant code:** `docker-compose.yml`, `.env.example`
 
 ### Problem
 
-CeRAI evaluates chatbot *outputs* but has no awareness of whether those outputs are grounded in retrieved documents. For RAG-based systems (which most government AI chatbots use), this misses the most important failure modes:
+CeRAI's default judge model is `qwen3:32b` via Ollama, requiring approximately 19–32 GB VRAM and an NVIDIA GPU. DIGIT 3.0 — a major Indian government digital public infrastructure platform and the primary deployment context for government AI systems — targets deployment on 8 GB RAM machines. The evaluation tool requires 4× the RAM of the systems it is meant to evaluate.
 
-| Failure mode | CeRAI detects? |
-|---|---|
-| Hallucinated answer (not in docs) | No |
-| Retrieved wrong document | No |
-| Answer contradicts retrieved context | No |
-| Correct answer but from memory, not docs | No |
+### Steps to reproduce
 
-**Real-world impact:** A RAG bot that hallucinates a plausible-sounding answer to a policy question will pass CeRAI's evaluation while giving citizens incorrect information.
+1. Attempt `docker compose up` on a standard developer laptop without a discrete GPU.
+2. Observe that the Ollama service fails to load `qwen3:32b`.
+
+### Impact
+
+Most ML engineers, QA teams, and government technical teams cannot run the tool at all.
 
 ### Suggested fix
 
-Integrate RAGAS (https://docs.ragas.io/) metrics for RAG systems:
-
-```python
-from ragas import evaluate, EvaluationDataset
-from ragas.metrics import Faithfulness, AnswerRelevancy
-
-dataset = EvaluationDataset(samples=[
-    SingleTurnSample(
-        user_input=question,
-        response=bot_answer,
-        retrieved_contexts=retrieved_docs,
-    )
-    for question, bot_answer, retrieved_docs in pipeline_outputs
-])
-result = evaluate(dataset=dataset, metrics=[Faithfulness(), AnswerRelevancy()])
-```
-
-This requires the evaluation framework to receive `retrieved_contexts` from the bot — which means the REST API (see Issue #1) should optionally return source documents alongside the answer.
+Make the judge model configurable. Add an OpenAI/Anthropic API fallback so teams without GPU hardware can run evaluation using a cloud judge. Document minimum hardware requirements prominently in the README.
 
 ---
 
-## Issue 5 — 8-container Docker stack is too complex to install for average developer/government team
+## Issue #142 — Docker build fails on Apple Silicon (aarch64)
 
-**Title:** `docs/ux: docker-compose stack (8 containers + Selenium + Ollama) is too complex for average deployment`
+**Filed:** https://github.com/cerai-iitm/AIEvaluationTool/issues/142
 
-**Labels:** `documentation`, `developer-experience`, `accessibility`
-
-**Body:**
+**Relevant code:** `requirements.txt`
 
 ### Problem
 
-Running CeRAI requires starting 8 Docker containers simultaneously:
-- `ollama` (model server, ~20–32 GB RAM)
-- `selenium` (browser automation for WhatsApp)
-- `whatsapp_connector`
-- `evaluator`
-- `test_runner`
-- `dashboard`
-- `redis`
-- `postgres`
+`docker compose build` fails with `OSError: [Errno 5] Input/output error` before the image starts on Apple Silicon (M2/M3). The build pulls ~3.5 GB of NVIDIA CUDA packages (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`, `triton`, etc.) that target Linux x86_64 and have no `linux/arm64` wheels. This is not a disk or configuration issue — the packages are architecturally incompatible with aarch64.
 
-**Observed failure during install attempt:**
+### Steps to reproduce
+
+```bash
+git clone https://github.com/cerai-iitm/AIEvaluationTool
+cd AIEvaluationTool
+docker compose build
+# → OSError: [Errno 5] Input/output error during pip install
 ```
-OSError: [Errno 5] Input/output error
-```
-Caused by disk exhaustion during `docker compose build` — pip was downloading 2 GB+ of NVIDIA CUDA libraries (cublas 542 MB, cudnn 433 MB, cusparselt 220 MB, torch ~800 MB) as transitive dependencies. A machine with only 905 MB free disk cannot complete the build.
 
-**The README does not mention:**
-- Minimum disk space required (at least 10 GB recommended)
-- Minimum RAM required (28–32 GB for the judge model alone)
-- That GPU drivers must be installed on the host
-- That a WhatsApp account (phone number) is required
+### Impact
 
-For a tool meant to democratise AI evaluation in government, the installation experience is inaccessible to teams that don't have dedicated DevOps support.
+Any developer on Apple Silicon (a large fraction of the Mac developer population) is blocked before writing a single test case.
 
-### Suggested fixes
+### Suggested fix
 
-1. Add a `REQUIREMENTS.md` with explicit hardware/software prerequisites.
-2. Add a `--lite` mode with a smaller judge model (`qwen3:8b` or `llama3.2:3b`) that runs on 8 GB RAM.
-3. Add a `--no-gpu` flag that falls back to a cloud API judge (OpenAI, Anthropic, or Sarvam AI for India-specific deployments).
-4. Add a smoke-test script (`check_requirements.sh`) that validates disk, RAM, and GPU availability before starting the build.
-5. Consider publishing a pre-built Docker image to avoid pip-from-source builds.
+Separate GPU-optional dependencies into a `requirements-gpu.txt`. Use `platform: linux/amd64` only for services that require CUDA and provide a CPU-only fallback image for the evaluator service.
 
 ---
 
-## Issue 6 — BiasDetection uses a surface-level text classifier that cannot distinguish biased responses from neutral reporting of bias
+## Issue #143 — Silent exception handling makes evaluation failures indistinguishable from low scores
 
-**Title:** `bug: BiasDetection scores surface language, not AI-generated bias — produces false positives on factual reporting`
+**Filed:** https://github.com/cerai-iitm/AIEvaluationTool/issues/143
 
-**Labels:** `bug`, `evaluation-quality`
-
-**Body:**
+**Relevant code:** `src/lib/strategy/utils_new.py:221`, `src/lib/strategy/fairness_stereotype_agreement.py:124`
 
 ### Problem
 
-`BiasDetection` ([`src/lib/strategy/bias_detection.py`](src/lib/strategy/bias_detection.py)) uses `amedvedev/bert-tiny-cognitive-bias` to classify the agent's response text. The model was trained to detect whether text *reads as biased* — it does not and cannot determine who introduced the bias or whether the AI is asserting a claim vs quoting a source.
+Bare `except` blocks in two locations silently swallow errors and return `0` or `{}` with no logging. In `utils_new.py`, a failed `json.loads` on the LLM judge response returns an empty dict. In `fairness_stereotype_agreement.py`, a `except: pass` inside the per-question scoring loop silently drops failed evaluations, deflating the denominator.
 
-**Concrete false positive:**
+### Steps to reproduce
+
+1. Provide a malformed response from the LLM judge (e.g. truncated JSON).
+2. Observe that `utils_new.py` returns `{}` with no warning, log message, or exception.
+3. A run where 30% of evaluations silently failed looks identical in the output to a completed run.
+
+### Impact
+
+Users cannot audit which evaluations actually ran. Silent failures corrupt aggregate scores without any indication that something went wrong.
+
+### Suggested fix
+
+Replace bare `except` with specific exception types, log the error at `WARNING` or `ERROR` level, and propagate a sentinel value (`None`) that callers can detect and exclude from aggregation.
+
+---
+
+## Issue #144 — GPU service calls have no timeout — evaluation hangs indefinitely
+
+**Filed:** https://github.com/cerai-iitm/AIEvaluationTool/issues/144
+
+**Relevant code:** `src/lib/strategy/safety.py`, `src/lib/strategy/language_strategies.py`, `src/lib/strategy/fluency_score.py`, `src/lib/strategy/transliterated_strategies.py`, `src/lib/strategy/indian_lang_grammatical_check.py`
+
+### Problem
+
+`requests.post` calls to the GPU service (`GPU_URL`) across multiple strategy files have no `timeout=` argument, defaulting to no timeout. `truth_internal.py` (line 107) uses `timeout=45` and `_rag_modules.py` uses `timeout=10`, confirming the omission is unintentional. If the GPU service is slow or unreachable, the evaluation process hangs indefinitely with no error message and must be killed manually.
+
+### Steps to reproduce
+
+1. Set `GPU_URL` to an unreachable address.
+2. Run any strategy that calls the GPU service (e.g. `safety.py`).
+3. Observe that the process hangs with no timeout and no error output.
+
+### Impact
+
+A single unreachable GPU service stalls an entire evaluation run indefinitely.
+
+### Suggested fix
+
+Add `timeout=30` (or a configurable value from `defaults.json`) to all `requests.post` calls targeting external services.
+
+---
+
+## Issue #149 — BiasDetection uses a surface-level text classifier that cannot distinguish biased responses from neutral reporting of bias
+
+**Filed:** https://github.com/cerai-iitm/AIEvaluationTool/issues/149
+
+**Relevant code:** `src/lib/strategy/bias_detection.py`
+
+### Problem
+
+`BiasDetection` uses `amedvedev/bert-tiny-cognitive-bias` to classify the agent's response text. The model detects whether text *reads as biased* — it does not determine who introduced the bias or whether the AI is asserting a claim vs quoting a source. `evaluate()` passes only `agent_response`, ignoring `testcase.prompt` entirely.
+
+### Steps to reproduce
+
 ```
 User: What does research say about gender and career preferences?
 Bot:  Studies from the 1970s show women preferred caretaking roles —
       however, this finding has been widely challenged by modern research.
 ```
-This response provides balanced historical context. The classifier still scores it as highly biased because the surface text contains demographic language.
 
-**Affected code:**
-- [`bias_detection.py:44`](src/lib/strategy/bias_detection.py) — `bias_detector()` passes `agent_response` directly; no context about whether the statement is an assertion or a quotation
-- [`bias_detection.py:92`](src/lib/strategy/bias_detection.py) — `evaluate()` passes only `agent_response`, ignoring `testcase.prompt` entirely
+This response provides balanced historical context. The classifier scores it as highly biased because the surface text contains demographic language.
 
-### Steps to reproduce
+### Impact
 
-1. Write a test case where the expected response is a balanced, well-sourced answer that mentions a demographic group.
-2. Run `BiasDetectionStrategy.evaluate()` against it.
-3. Observe a high bias score despite the response being factually correct and appropriately hedged.
+False positives on legitimate factual reporting make the bias metric unreliable. The score measures surface language patterns, not AI-generated bias.
 
 ### Suggested fix
 
-- Replace or supplement the surface classifier with an LLM-as-judge prompt that receives both the question and the response, and is explicitly instructed to distinguish *asserting a bias* from *reporting that a bias exists in the literature*.
-- Pass `testcase.prompt` to the classifier so it has the question context needed to make this distinction.
-- Consider using a model fine-tuned specifically for detecting AI-generated bias (e.g. a model trained on HolisticBias or BBQ), rather than a general cognitive-bias text classifier.
+Replace or supplement the surface classifier with an LLM-as-judge prompt that receives both the question and the response, explicitly instructed to distinguish *asserting a bias* from *reporting that a bias exists in the literature*.
 
 ---
 
-## Issue 7 — ComputeErrorRate does not compute an error rate — returns an absolute count with false positives and missed severities
+## Issue #150 — ComputeErrorRate does not compute an error rate — returns an absolute count with false positives and missed severities
 
-**Title:** `bug: ComputeErrorRate counts log lines containing "ERROR" substring — false positives, missed FATAL/CRITICAL, returns count not rate`
+**Filed:** https://github.com/cerai-iitm/AIEvaluationTool/issues/150
 
-**Labels:** `bug`, `evaluation-quality`
-
-**Body:**
+**Relevant code:** `src/lib/strategy/compute_error_rate.py`
 
 ### Problem
 
-`compute_error_rate_from_log()` ([`src/lib/strategy/compute_error_rate.py:20`](src/lib/strategy/compute_error_rate.py)) scans a log file and counts every line where `"ERROR"` appears as a case-insensitive substring. It returns an integer count, not a rate.
+`compute_error_rate_from_log()` counts lines where `"ERROR"` appears as a case-insensitive substring and returns an integer. Three bugs:
 
-**Three concrete bugs:**
+1. **False positives:** `"INFO No errors detected"` matches; `"WARNING Error handling skipped"` matches.
+2. **Missed severities:** `"FATAL Service crashed"` and `"CRITICAL DB pool exhausted"` are not counted.
+3. **Not a rate:** `total_lines` is computed but never used. The metric is named `ComputeErrorRate` but returns an absolute count.
 
-**1. False positives — matches substring, not log level:**
-```
-INFO No errors detected this session   ← "ERROR" in "errors" → counted
-WARNING Error handling path skipped    ← "ERROR" in "Error" → counted
-```
-
-**2. Missed severities:**
-```
-FATAL  Service crashed — OOM killed    ← not counted (no "ERROR" substring)
-CRITICAL DB connection pool exhausted  ← not counted
-```
-
-**3. Returns a count, not a rate:**
-```python
-return error_count          # integer — e.g. 42
-# total_lines is computed but never used
-```
-The metric is named `ComputeErrorRate` and the evaluate() docstring says "A value representing the number of errors" — the name and the implementation disagree. A count of 42 is meaningless without knowing whether 42 errors occurred in 100 interactions or 100,000.
-
-**Bonus bug:** `evaluate()` calls `compute_error_rate_from_log()` twice — once for the score and once for the reason string — opening and reading the file twice per evaluation call.
+Additionally, `evaluate()` calls `compute_error_rate_from_log()` twice — once for the score and once for the reason string — reading the file twice per evaluation call.
 
 ### Steps to reproduce
 
 ```python
-# log file containing:
-# INFO No errors detected
-# FATAL Service crashed
-strategy = ComputeErrorRate()
-score, reason = strategy.evaluate(testcase, conversation)
-# score = 2 (both lines match), FATAL not counted
+# Log file: "INFO No errors detected\nFATAL Service crashed"
+score, reason = ComputeErrorRate().evaluate(testcase, conversation)
+# score = 2 ("errors" and "FATAL" — wait, only "errors" matches)
+# score = 1 ("INFO No errors detected" matches; "FATAL" does not)
 ```
 
 ### Suggested fix
 
-```python
-def compute_error_rate_from_log(self, file_path: str) -> float:
-    import re
-    error_pattern = re.compile(r'\b(ERROR|FATAL|CRITICAL)\b')
-    error_count = 0
-    total_lines = 0
-    with open(file_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            total_lines += 1
-            if error_pattern.search(line):
-                error_count += 1
-    return error_count / total_lines if total_lines > 0 else 0.0
-```
+Use `re.compile(r'\b(ERROR|FATAL|CRITICAL)\b')` for word-boundary matching and return `error_count / total_lines` as a float.
 
 ---
 
-## Issue 8 — Compute_MTBF treats every [ERROR] log entry as a distinct system failure, producing artificially low MTBF
+## Issue #151 — Compute_MTBF treats every [ERROR] log entry as a distinct system failure, producing artificially low MTBF
 
-**Title:** `bug: Compute_MTBF has no failure deduplication — consecutive error lines from one incident produce sub-second MTBF`
+**Filed:** https://github.com/cerai-iitm/AIEvaluationTool/issues/151
 
-**Labels:** `bug`, `evaluation-quality`
-
-**Body:**
+**Relevant code:** `src/lib/strategy/compute_mtbf.py`
 
 ### Problem
 
-`extract_failure_timestamps()` ([`src/lib/strategy/compute_mtbf.py:21`](src/lib/strategy/compute_mtbf.py)) collects one timestamp per log line containing `[ERROR]`. There is no deduplication, no incident grouping, and no minimum inter-failure interval.
+`extract_failure_timestamps()` collects one timestamp per `[ERROR]` line with no deduplication. Three consecutive error lines from a single incident (connection failed, retry failed, stack trace) produce three failure events and a MTBF of under one second for a system with one actual failure.
 
-**Concrete example:**
+Additionally, `calculate_mtbf_from_timestamps()` raises `ValueError` when fewer than two timestamps exist — crashing the evaluation pipeline with an unhandled exception rather than returning a safe fallback for healthy (zero-error) sessions.
+
+### Steps to reproduce
+
 ```
 [2026-05-10 10:00:00,000] [ERROR] Connection failed
 [2026-05-10 10:00:00,100] [ERROR] Retry attempt 1 failed
 [2026-05-10 10:00:00,200] [ERROR] Stacktrace: java.net.SocketException
 ```
-These three lines are one failure event — a single failed connection with retry logging and a stack trace. `calculate_mtbf_from_timestamps()` computes:
-- Interval 1: 0.0001 hours (100ms)
-- Interval 2: 0.0001 hours (100ms)
-- **MTBF: 0.0001 hours** (~360 ms)
 
-A system with one actual failure in an hour-long session would report a MTBF under one second.
-
-**Second bug — ValueError instead of a safe fallback:**
-```python
-if len(timestamps) < 2:
-    raise ValueError("At least two failure timestamps are needed to compute MTBF.")
-```
-If the log contains zero or one `[ERROR]` lines — a healthy session — `evaluate()` raises an unhandled `ValueError` and crashes the evaluation pipeline instead of returning a defined score (e.g. `float('inf')` or `None`).
-
-### Steps to reproduce
-
-1. Create a log file with three consecutive `[ERROR]` lines within one second (e.g. a failed DB connection with retry and stack trace).
-2. Run `Compute_MTBF.evaluate()`.
-3. Observe MTBF reported as ~100ms despite the system having one actual failure.
+MTBF computed: ~100ms — one actual failure reported as MTBF of 100ms.
 
 ### Suggested fix
 
-- Apply a minimum inter-failure gap (e.g. 60 seconds) to group consecutive errors into a single incident before computing intervals.
-- Return `None` or `float('inf')` (with a descriptive reason) when fewer than two failure events are detected, rather than raising.
-- Extend matching to include `[FATAL]` and `[CRITICAL]` log levels.
+Apply a minimum inter-failure gap (e.g. 60 seconds) to group consecutive errors into a single incident. Return `None` or `float('inf')` when fewer than two failure events are detected rather than raising.
