@@ -151,8 +151,8 @@ st.header("2. CeRAI AI Evaluation Tool — Assessment")
 st.markdown("""
 The [CeRAI AI Evaluation Tool](https://github.com/cerai-iitm/AIEvaluationTool) was cloned,
 its source code was read in full, and a Docker build was attempted. The tool was determined to
-be unsuitable for evaluating this class of conversational system. Seven issues were filed on the
-repository.
+be unsuitable for evaluating this class of conversational system. Ten issues were filed on the
+[repository](https://github.com/cerai-iitm/AIEvaluationTool/issues).
 """)
 
 st.subheader("What we found")
@@ -163,65 +163,76 @@ issues = [
         "title": "RAG metrics run against academic benchmarks, not the bot's knowledge base",
         "file": "src/lib/strategy/truth_internal.py, hallucination.py",
         "impact": "Evaluation runs against SQuAD, CODAH, HotPotQA, HaluQA — academic datasets. For a bot built over a domain-specific knowledge base, scores measure general QA performance, not domain faithfulness. A production RAG evaluator must receive retrieved contexts and verify the response is grounded in them.",
+        "url": "https://github.com/cerai-iitm/AIEvaluationTool/issues/136",
     },
     {
         "id": "#2",
         "title": "No adversarial / prompt injection testing",
         "file": "src/lib/strategy/ (all strategy files)",
         "impact": "No test coverage for prompt injection, jailbreak attempts, or domain-wrapped harmful requests. Government-facing bots are high-value targets for these attacks. Without adversarial evaluation, resistance is invisible.",
+        "url": "https://github.com/cerai-iitm/AIEvaluationTool/issues/138",
     },
     {
         "id": "#3",
         "title": "No limitation-awareness evaluation category",
         "file": "src/lib/strategy/ (all strategy files)",
         "impact": "RAG hallucination risk is highest for questions about capabilities that don't exist. Running the alternative evaluator found a confirmed hallucination (bot stated published configurations are editable; they are immutable) that a generic faithfulness metric missed but a limitation-probing GEval caught with score 0.0.",
+        "url": "https://github.com/cerai-iitm/AIEvaluationTool/issues/140",
     },
     {
         "id": "#4",
         "title": "Infrastructure requirements exclude the tool's primary audience",
         "file": "docker-compose.yml, .env.example",
         "impact": "Requires qwen3:32b via Ollama (~19GB VRAM) and NVIDIA GPU. Most ML engineers, QA teams, and product teams work on standard laptops or commodity VMs. The tool requires more compute than many of the systems it evaluates.",
+        "url": "https://github.com/cerai-iitm/AIEvaluationTool/issues/141",
     },
     {
         "id": "#5",
         "title": "Docker build fails on Apple Silicon (aarch64)",
         "file": "requirements.txt",
         "impact": "docker compose build fails with OSError: [Errno 5] before the image starts. ~3.5GB of NVIDIA CUDA packages target Linux x86_64 — architecturally incompatible with aarch64. Any Mac developer is blocked before writing a single test case.",
+        "url": "https://github.com/cerai-iitm/AIEvaluationTool/issues/142",
     },
     {
         "id": "#6",
         "title": "Silent exception handling makes failures indistinguishable from low scores",
         "file": "src/lib/strategy/utils_new.py:221, fairness_stereotype_agreement.py:124",
         "impact": "Bare except blocks return 0 or {} with no logging. A run that silently failed 30% of evaluations looks identical to one that completed fully. Users cannot audit which evaluations actually ran.",
+        "url": "https://github.com/cerai-iitm/AIEvaluationTool/issues/143",
     },
     {
         "id": "#7",
         "title": "GPU service calls have no timeout — evaluation hangs indefinitely",
         "file": "src/lib/strategy/safety.py, language_strategies.py, fluency_score.py",
         "impact": "requests.post with no timeout= argument defaults to no timeout. If GPU_URL is slow or unreachable, the process hangs forever with no error and requires a manual kill.",
+        "url": "https://github.com/cerai-iitm/AIEvaluationTool/issues/144",
     },
     {
         "id": "#8",
         "title": "BiasDetection uses a surface-level text classifier — cannot distinguish biased responses from neutral reporting of bias",
         "file": "src/lib/strategy/bias_detection.py",
         "impact": "The amedvedev/bert-tiny-cognitive-bias model classifies whether surface language sounds biased, not whether the AI generated a biased response. A response quoting a study ('studies show women prefer caretaking roles') receives the same high bias score as one asserting it. False positives on legitimate factual reporting make the bias metric unreliable for production use.",
+        "url": "https://github.com/cerai-iitm/AIEvaluationTool/issues/149",
     },
     {
         "id": "#9",
         "title": "ComputeErrorRate returns an absolute count, not an error rate — with false positives and missed severities",
         "file": "src/lib/strategy/compute_error_rate.py",
         "impact": "Counts lines where 'ERROR' appears as a case-insensitive substring. 'INFO No errors detected' matches and is counted; 'FATAL Service crashed' is missed. Returns an integer, not errors/total interactions. total_lines is computed but never used. The log file is also scanned twice per evaluate() call.",
+        "url": "https://github.com/cerai-iitm/AIEvaluationTool/issues/150",
     },
     {
         "id": "#10",
         "title": "Compute_MTBF treats every [ERROR] log entry as a distinct system failure, producing artificially low MTBF",
         "file": "src/lib/strategy/compute_mtbf.py",
         "impact": "extract_failure_timestamps() collects one timestamp per [ERROR] line with no deduplication. Three consecutive error lines from a single incident produce three failure events and a sub-second MTBF for a system with one actual failure. Raises ValueError when fewer than two timestamps exist — crashes the evaluation with an unhandled exception rather than returning a safe fallback.",
+        "url": "https://github.com/cerai-iitm/AIEvaluationTool/issues/151",
     },
 ]
 
 for issue in issues:
     with st.expander(f"Issue {issue['id']}: {issue['title']}"):
+        st.markdown(f"**Filed:** [cerai-iitm/AIEvaluationTool{issue['url'].split('issues')[1]}]({issue['url']})")
         st.markdown(f"**Relevant code:** `{issue['file']}`")
         st.markdown(f"**Impact on evaluation quality:** {issue['impact']}")
 
