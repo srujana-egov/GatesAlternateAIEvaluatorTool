@@ -53,6 +53,13 @@ The most significant finding: CeRAI's "RAG evaluation" (`truth_internal.py`, `ha
 
 ## Setup
 
+**Requirements:** Python 3.10+
+
+```bash
+git clone https://github.com/srujana-egov/GatesAlternateAIEvaluatorTool
+cd GatesAlternateAIEvaluatorTool
+```
+
 ### 1. Install dependencies
 
 ```bash
@@ -147,6 +154,8 @@ Results from the full run are in [`results/deepeval_results_latest.json`](result
 ---
 
 ## Viewing the report
+
+Pre-saved results are included in `results/` — the report runs without a live bot or OpenAI key.
 
 ```bash
 streamlit run evaluation_report.py
