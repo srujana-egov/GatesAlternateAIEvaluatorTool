@@ -66,23 +66,36 @@ which made Option B the right path.
 with col_ai:
     st.subheader("AI use in completing this assignment")
     st.markdown("""
-Claude Code was used throughout to navigate the decision and implementation.
-The starting point was a working RAG bot with known gaps — false rejections on in-domain
-topics, uncertainty about hallucination risk on capability questions — and an open question:
-does CeRAI address these better than DeepEval or RAGAS? Reading through the CeRAI source files
-together is where the benchmark-dataset finding emerged; the question "what does
-`truth_internal.py` actually test against?" led to the SQuAD/CODAH discovery that became
-the core of Issue #1.
+Claude Code was used as a code-reading and reasoning partner throughout — not to generate
+boilerplate, but to work through what CeRAI actually does versus what it claims to do.
+The process was file-by-file: `truth_internal.py` was read to answer "what dataset does
+the truthfulness metric test against?", which surfaced the SQuAD/CODAH/HotPotQA finding.
+`data/conversation.py` was checked to confirm there is no `retrieved_contexts` field —
+ruling out the possibility that faithfulness grounding was handled elsewhere.
+`safety.py` was read to understand whether adversarial coverage was meaningful, revealing
+that all three ShieldGemma modes are single-turn classifiers with no injection simulation.
+`robustness_advInstruction.py` was read and initially misread — it uses cosine similarity
+on adversarial GLUE benchmarks, which tests paraphrase robustness, not prompt injection;
+that distinction had to be debated before the issue was framed correctly.
 
-Multiple evaluation scripts were written and debugged iteratively. The DeepEval API changed
-between versions — GEval import paths, `evaluate()` vs `measure()`, `SingleTurnParams` enum
-for evaluation_params — and each failure was diagnosed and corrected in the session rather
-than by working around it. The session also served as a thinking partner for framing: deciding
-which roadblocks were environment-specific (Apple Silicon) versus fundamental design limitations,
-and sharpening issue descriptions so they applied to all teams using the tool, not only DIGIT's
-deployment context. The confirmed hallucination in `ds_lim_004` — caught by the
-`limitation_awareness` GEval and missed by generic faithfulness — was found during a live run
-in the session and then incorporated into the issue framing for Issue #3.
+Not every hypothesis held. An initial issue about missing out-of-scope detection was
+invalidated when `DataPoints.json` was read and metric 20 was found — it already covers
+out-of-scope queries. The real gap (domain-specific capability hallucination, not topic drift)
+only emerged after that. Issue framing for the OpenAI/Gemini API keys required checking
+`api_handler.py` directly — the keys exist in `.env.example` but serve the interface manager,
+not the judge layer; conflating the two would have produced a false issue. Error paths rather
+than happy paths were what revealed the silent `except` blocks in `utils_new.py` and
+`fairness_stereotype_agreement.py`, and cross-referencing `truth_internal.py` (which has
+`timeout=45`) against `safety.py` and `fluency_score.py` (which have none) was what
+established the timeout inconsistency as unintentional rather than deliberate.
+
+On the implementation side, the DeepEval API required iterative debugging — GEval import
+paths, `evaluate()` vs `measure()`, the `SingleTurnParams` enum for `evaluation_params`
+all changed between versions and were corrected against actual error output rather than
+documentation. The `limitation_awareness` GEval category was designed specifically because
+standard faithfulness metrics missed `ds_lim_004` (the bot asserted published configurations
+are editable; they are immutable) during a live run — that failure became the concrete
+evidence behind Issue #3 and the design rationale for the novel category.
 """)
 
 st.divider()
