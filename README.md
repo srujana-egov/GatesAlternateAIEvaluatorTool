@@ -5,6 +5,8 @@ This repository contains a critique of the [CeRAI AIEvaluationTool](https://gith
 
 The system under evaluation is **DIGIT Studio Assistant** — a RAG chatbot built on the DIGIT platform. Source: [srujana-egov/EGOV_RAG_V5](https://github.com/srujana-egov/EGOV_RAG_V5).
 
+**Live report:** https://evaluationreportpy-ecqdeuaymaoycteqpxhs9v.streamlit.app/
+
 ---
 
 ## Why Option B
