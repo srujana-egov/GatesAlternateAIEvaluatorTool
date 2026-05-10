@@ -208,3 +208,151 @@ For a tool meant to democratise AI evaluation in government, the installation ex
 3. Add a `--no-gpu` flag that falls back to a cloud API judge (OpenAI, Anthropic, or Sarvam AI for India-specific deployments).
 4. Add a smoke-test script (`check_requirements.sh`) that validates disk, RAM, and GPU availability before starting the build.
 5. Consider publishing a pre-built Docker image to avoid pip-from-source builds.
+
+---
+
+## Issue 6 — BiasDetection uses a surface-level text classifier that cannot distinguish biased responses from neutral reporting of bias
+
+**Title:** `bug: BiasDetection scores surface language, not AI-generated bias — produces false positives on factual reporting`
+
+**Labels:** `bug`, `evaluation-quality`
+
+**Body:**
+
+### Problem
+
+`BiasDetection` ([`src/lib/strategy/bias_detection.py`](src/lib/strategy/bias_detection.py)) uses `amedvedev/bert-tiny-cognitive-bias` to classify the agent's response text. The model was trained to detect whether text *reads as biased* — it does not and cannot determine who introduced the bias or whether the AI is asserting a claim vs quoting a source.
+
+**Concrete false positive:**
+```
+User: What does research say about gender and career preferences?
+Bot:  Studies from the 1970s show women preferred caretaking roles —
+      however, this finding has been widely challenged by modern research.
+```
+This response provides balanced historical context. The classifier still scores it as highly biased because the surface text contains demographic language.
+
+**Affected code:**
+- [`bias_detection.py:44`](src/lib/strategy/bias_detection.py) — `bias_detector()` passes `agent_response` directly; no context about whether the statement is an assertion or a quotation
+- [`bias_detection.py:92`](src/lib/strategy/bias_detection.py) — `evaluate()` passes only `agent_response`, ignoring `testcase.prompt` entirely
+
+### Steps to reproduce
+
+1. Write a test case where the expected response is a balanced, well-sourced answer that mentions a demographic group.
+2. Run `BiasDetectionStrategy.evaluate()` against it.
+3. Observe a high bias score despite the response being factually correct and appropriately hedged.
+
+### Suggested fix
+
+- Replace or supplement the surface classifier with an LLM-as-judge prompt that receives both the question and the response, and is explicitly instructed to distinguish *asserting a bias* from *reporting that a bias exists in the literature*.
+- Pass `testcase.prompt` to the classifier so it has the question context needed to make this distinction.
+- Consider using a model fine-tuned specifically for detecting AI-generated bias (e.g. a model trained on HolisticBias or BBQ), rather than a general cognitive-bias text classifier.
+
+---
+
+## Issue 7 — ComputeErrorRate does not compute an error rate — returns an absolute count with false positives and missed severities
+
+**Title:** `bug: ComputeErrorRate counts log lines containing "ERROR" substring — false positives, missed FATAL/CRITICAL, returns count not rate`
+
+**Labels:** `bug`, `evaluation-quality`
+
+**Body:**
+
+### Problem
+
+`compute_error_rate_from_log()` ([`src/lib/strategy/compute_error_rate.py:20`](src/lib/strategy/compute_error_rate.py)) scans a log file and counts every line where `"ERROR"` appears as a case-insensitive substring. It returns an integer count, not a rate.
+
+**Three concrete bugs:**
+
+**1. False positives — matches substring, not log level:**
+```
+INFO No errors detected this session   ← "ERROR" in "errors" → counted
+WARNING Error handling path skipped    ← "ERROR" in "Error" → counted
+```
+
+**2. Missed severities:**
+```
+FATAL  Service crashed — OOM killed    ← not counted (no "ERROR" substring)
+CRITICAL DB connection pool exhausted  ← not counted
+```
+
+**3. Returns a count, not a rate:**
+```python
+return error_count          # integer — e.g. 42
+# total_lines is computed but never used
+```
+The metric is named `ComputeErrorRate` and the evaluate() docstring says "A value representing the number of errors" — the name and the implementation disagree. A count of 42 is meaningless without knowing whether 42 errors occurred in 100 interactions or 100,000.
+
+**Bonus bug:** `evaluate()` calls `compute_error_rate_from_log()` twice — once for the score and once for the reason string — opening and reading the file twice per evaluation call.
+
+### Steps to reproduce
+
+```python
+# log file containing:
+# INFO No errors detected
+# FATAL Service crashed
+strategy = ComputeErrorRate()
+score, reason = strategy.evaluate(testcase, conversation)
+# score = 2 (both lines match), FATAL not counted
+```
+
+### Suggested fix
+
+```python
+def compute_error_rate_from_log(self, file_path: str) -> float:
+    import re
+    error_pattern = re.compile(r'\b(ERROR|FATAL|CRITICAL)\b')
+    error_count = 0
+    total_lines = 0
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            total_lines += 1
+            if error_pattern.search(line):
+                error_count += 1
+    return error_count / total_lines if total_lines > 0 else 0.0
+```
+
+---
+
+## Issue 8 — Compute_MTBF treats every [ERROR] log entry as a distinct system failure, producing artificially low MTBF
+
+**Title:** `bug: Compute_MTBF has no failure deduplication — consecutive error lines from one incident produce sub-second MTBF`
+
+**Labels:** `bug`, `evaluation-quality`
+
+**Body:**
+
+### Problem
+
+`extract_failure_timestamps()` ([`src/lib/strategy/compute_mtbf.py:21`](src/lib/strategy/compute_mtbf.py)) collects one timestamp per log line containing `[ERROR]`. There is no deduplication, no incident grouping, and no minimum inter-failure interval.
+
+**Concrete example:**
+```
+[2026-05-10 10:00:00,000] [ERROR] Connection failed
+[2026-05-10 10:00:00,100] [ERROR] Retry attempt 1 failed
+[2026-05-10 10:00:00,200] [ERROR] Stacktrace: java.net.SocketException
+```
+These three lines are one failure event — a single failed connection with retry logging and a stack trace. `calculate_mtbf_from_timestamps()` computes:
+- Interval 1: 0.0001 hours (100ms)
+- Interval 2: 0.0001 hours (100ms)
+- **MTBF: 0.0001 hours** (~360 ms)
+
+A system with one actual failure in an hour-long session would report a MTBF under one second.
+
+**Second bug — ValueError instead of a safe fallback:**
+```python
+if len(timestamps) < 2:
+    raise ValueError("At least two failure timestamps are needed to compute MTBF.")
+```
+If the log contains zero or one `[ERROR]` lines — a healthy session — `evaluate()` raises an unhandled `ValueError` and crashes the evaluation pipeline instead of returning a defined score (e.g. `float('inf')` or `None`).
+
+### Steps to reproduce
+
+1. Create a log file with three consecutive `[ERROR]` lines within one second (e.g. a failed DB connection with retry and stack trace).
+2. Run `Compute_MTBF.evaluate()`.
+3. Observe MTBF reported as ~100ms despite the system having one actual failure.
+
+### Suggested fix
+
+- Apply a minimum inter-failure gap (e.g. 60 seconds) to group consecutive errors into a single incident before computing intervals.
+- Return `None` or `float('inf')` (with a descriptive reason) when fewer than two failure events are detected, rather than raising.
+- Extend matching to include `[FATAL]` and `[CRITICAL]` log levels.

@@ -188,6 +188,24 @@ issues = [
         "file": "src/lib/strategy/safety.py, language_strategies.py, fluency_score.py",
         "impact": "requests.post with no timeout= argument defaults to no timeout. If GPU_URL is slow or unreachable, the process hangs forever with no error and requires a manual kill.",
     },
+    {
+        "id": "#8",
+        "title": "BiasDetection uses a surface-level text classifier — cannot distinguish biased responses from neutral reporting of bias",
+        "file": "src/lib/strategy/bias_detection.py",
+        "impact": "The amedvedev/bert-tiny-cognitive-bias model classifies whether surface language sounds biased, not whether the AI generated a biased response. A response quoting a study ('studies show women prefer caretaking roles') receives the same high bias score as one asserting it. False positives on legitimate factual reporting make the bias metric unreliable for production use.",
+    },
+    {
+        "id": "#9",
+        "title": "ComputeErrorRate returns an absolute count, not an error rate — with false positives and missed severities",
+        "file": "src/lib/strategy/compute_error_rate.py",
+        "impact": "Counts lines where 'ERROR' appears as a case-insensitive substring. 'INFO No errors detected' matches and is counted; 'FATAL Service crashed' is missed. Returns an integer, not errors/total interactions. total_lines is computed but never used. The log file is also scanned twice per evaluate() call.",
+    },
+    {
+        "id": "#10",
+        "title": "Compute_MTBF treats every [ERROR] log entry as a distinct system failure, producing artificially low MTBF",
+        "file": "src/lib/strategy/compute_mtbf.py",
+        "impact": "extract_failure_timestamps() collects one timestamp per [ERROR] line with no deduplication. Three consecutive error lines from a single incident produce three failure events and a sub-second MTBF for a system with one actual failure. Raises ValueError when fewer than two timestamps exist — crashes the evaluation with an unhandled exception rather than returning a safe fallback.",
+    },
 ]
 
 for issue in issues:
@@ -430,6 +448,9 @@ summary_block = {
         "Docker build fails on Apple Silicon (aarch64)",
         "Silent exception handling makes failures indistinguishable from low scores",
         "GPU service calls have no timeout — evaluation hangs indefinitely",
+        "BiasDetection uses a surface-level text classifier — cannot distinguish biased responses from neutral reporting of bias",
+        "ComputeErrorRate returns an absolute count, not an error rate — with false positives and missed severities",
+        "Compute_MTBF treats every [ERROR] log entry as a distinct system failure, producing artificially low MTBF",
     ],
     "alternative_evaluator": {
         "framework": "DeepEval 4.0.0",
