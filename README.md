@@ -3,19 +3,21 @@
 
 This repository contains a critique of the [CeRAI AIEvaluationTool](https://github.com/cerai-iitm/AIEvaluationTool) and a working alternative evaluation framework built using [DeepEval](https://github.com/confident-ai/deepeval).
 
+The system under evaluation is **DIGIT Studio Assistant** — a RAG chatbot built on the DIGIT platform. Source: [srujana-egov/EGOV_RAG_V5](https://github.com/srujana-egov/EGOV_RAG_V5).
+
 ---
 
 ## Why Option B
 
 Attempting to install CeRAI via `docker compose build` on Mac Apple Silicon (M2) failed with `OSError: [Errno 5] Input/output error` before the image could start. The build pulls ~3.5 GB of NVIDIA CUDA packages (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`, `triton`, etc.) that are architecturally incompatible with aarch64. This is not a disk or configuration issue — the packages target Linux x86_64 with NVIDIA drivers and cannot run on Apple Silicon.
 
-Reading the source code after the installation failure revealed deeper problems than portability. See [cerai_github_issues.md](cerai_github_issues.md) for the full critique and the seven issues filed on the CeRAI repository.
+Reading the source code after the installation failure revealed deeper problems than portability. See [cerai_github_issues.md](cerai_github_issues.md) for the full critique and the ten issues filed on the CeRAI repository.
 
 ---
 
 ## What is broken or insufficient in CeRAI
 
-Seven issues were filed at [github.com/cerai-iitm/AIEvaluationTool/issues](https://github.com/cerai-iitm/AIEvaluationTool/issues). Summary:
+Ten issues were filed at [github.com/cerai-iitm/AIEvaluationTool/issues](https://github.com/cerai-iitm/AIEvaluationTool/issues). Summary:
 
 | # | Issue | Impact |
 |---|---|---|
@@ -26,6 +28,9 @@ Seven issues were filed at [github.com/cerai-iitm/AIEvaluationTool/issues](https
 | 5 | Docker build fails on Apple Silicon | Blocks any aarch64 developer before evaluation starts |
 | 6 | Silent exception handling makes failures indistinguishable from low scores | Evaluation runs that crash partially look identical to completed runs |
 | 7 | GPU service calls have no timeout | Evaluation hangs indefinitely if GPU service is slow or unreachable |
+| 8 | BiasDetection scores surface language, not AI-generated bias | False positives on factual reporting of demographic research |
+| 9 | ComputeErrorRate returns a raw count, not a rate — with false positives and missed FATAL/CRITICAL | Metric name and implementation disagree; healthy sessions can score non-zero |
+| 10 | Compute_MTBF has no failure deduplication | Three error lines from one incident produce sub-second MTBF; crashes on healthy logs |
 
 The most significant finding: CeRAI's "RAG evaluation" (`truth_internal.py`, `hallucination.py`) tests responses against academic benchmark datasets — SQuAD, CODAH, HotPotQA, HaluQA, HaluSumm. For a bot built over a domain-specific knowledge base, this produces scores that are meaningless. The evaluator checks whether the bot knows Wikipedia passage comprehension, not whether it correctly represents the domain it was built for.
 
