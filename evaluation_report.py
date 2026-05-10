@@ -403,93 +403,86 @@ else:
 
 st.divider()
 
-# ── Section 5: Limitations ─────────────────────────────────────────────────────
+# ── Section 5: Tradeoffs ───────────────────────────────────────────────────────
 
-st.header("5. What This Evaluator Does Not Do Well")
+st.header("5. Tradeoffs vs CeRAI")
 
 st.markdown("""
-These are not gaps to fix later — they are open problems that no current framework
-(CeRAI, RAGAS, DeepEval, TruLens) solves adequately.
+This evaluator makes deliberate tradeoffs against CeRAI. Some gaps are fixable;
+others are open problems no current framework solves.
 """)
 
-limitations = [
-    ("No multi-turn evaluation",
-     "Every question is scored independently. Conversational coherence across turns, follow-up handling, and context retention are not tested."),
-    ("GEval is non-deterministic",
-     "LLM judge scores can vary ±0.05 between runs. Average 3 runs for publishable results."),
-    ("No WhatsApp or browser-channel evaluation",
-     "Only REST API endpoints are supported. CeRAI's Selenium-based WhatsApp evaluation is a genuine capability this framework does not replicate."),
-    ("No load or performance testing",
-     "Latency is measured per-question but the framework does not test at scale or under concurrent load."),
-    ("No dataset management UI",
-     "The golden set is a JSON file. There is no dashboard for managing test suites, versioning test cases, or comparing runs over time."),
-    ("Faithfulness requires retrieved contexts",
-     "The bot endpoint must return chunks via include_contexts=True. If contexts are empty, Faithfulness is skipped for that question."),
-    ("OpenAI dependency for LLM judge",
-     "--no-judge mode is free but limited to keyword checks only. Teams without OpenAI access cannot run the full evaluation."),
+tradeoffs = [
+    {
+        "Dimension": "Hardware requirement",
+        "This evaluator": "Any laptop — `pip install deepeval`, OpenAI API key",
+        "CeRAI": "NVIDIA GPU, 28–32 GB RAM for qwen3:32b judge",
+        "Winner": "This evaluator",
+    },
+    {
+        "Dimension": "Bot interface",
+        "This evaluator": "Any REST `POST /chat` endpoint",
+        "CeRAI": "WhatsApp via Selenium browser automation",
+        "Winner": "This evaluator — unless the bot is WhatsApp-only",
+    },
+    {
+        "Dimension": "RAG faithfulness",
+        "This evaluator": "DeepEval Faithfulness verifies answer against retrieved chunks",
+        "CeRAI": "No retrieved-context field — cannot check grounding",
+        "Winner": "This evaluator",
+    },
+    {
+        "Dimension": "Limitation-awareness",
+        "This evaluator": "Custom GEval catches capability hallucinations (caught ds_lim_004)",
+        "CeRAI": "Not present",
+        "Winner": "This evaluator",
+    },
+    {
+        "Dimension": "Adversarial / injection",
+        "This evaluator": "Custom GEval for injection, jailbreak, impersonation, harmful content",
+        "CeRAI": "Single-turn ShieldGemma classifier — no injection simulation",
+        "Winner": "This evaluator",
+    },
+    {
+        "Dimension": "LLM judge reproducibility",
+        "This evaluator": "GEval scores vary ±0.05 between runs — non-deterministic",
+        "CeRAI": "Rule-based checks are fully reproducible",
+        "Winner": "CeRAI",
+    },
+    {
+        "Dimension": "Multi-turn evaluation",
+        "This evaluator": "Not supported — every question scored independently",
+        "CeRAI": "Supports multi-turn conversation flows via Selenium",
+        "Winner": "CeRAI",
+    },
+    {
+        "Dimension": "Channel coverage",
+        "This evaluator": "REST API only",
+        "CeRAI": "WhatsApp Web, browser-based, and API targets",
+        "Winner": "CeRAI",
+    },
+    {
+        "Dimension": "Dataset management",
+        "This evaluator": "Golden set is a JSON file — no versioning, no run comparison UI",
+        "CeRAI": "Full TCE dashboard for test suites and run history",
+        "Winner": "CeRAI",
+    },
+    {
+        "Dimension": "API cost",
+        "This evaluator": "~$0.05/run (OpenAI gpt-4o) — `--no-judge` mode is free",
+        "CeRAI": "$0 API cost — fully local",
+        "Winner": "CeRAI for teams without an OpenAI key",
+    },
 ]
 
-for title, body in limitations:
-    with st.expander(title):
-        st.write(body)
-
-st.divider()
-
-# ── Section 6: Machine-readable summary ───────────────────────────────────────
-
-st.header("6. Machine-Readable Summary")
-
-cats = results.get("summary_by_category", {}) if results else {}
-
-summary_block = {
-    "evaluation": {
-        "system": "DIGIT Studio Assistant (EGOV_RAG_V5)",
-        "system_type": "RAG chatbot — custom REST API, PostgreSQL/pgvector, GPT-4",
-        "domain": "DIGIT platform documentation (eGovernments Foundation / India DPI)",
-        "tool_assessed": "CeRAI AIEvaluationTool (https://github.com/cerai-iitm/AIEvaluationTool)",
-        "option": "B — Critique & Rebuild",
-        "alternative_framework": "DeepEval 4.0.0 with OpenAI gpt-4o judge",
-        "golden_set_version": results.get("golden_set_version", "3.0") if results else "3.0",
-        "run_at": results.get("run_at", "N/A") if results else "N/A",
+st.dataframe(
+    tradeoffs,
+    use_container_width=True,
+    hide_index=True,
+    column_config={
+        "Winner": st.column_config.TextColumn(width="medium"),
     },
-    "cerai_issues_filed": [
-        "RAG metrics run against academic benchmarks, not the bot's knowledge base",
-        "No adversarial / prompt injection testing",
-        "No limitation-awareness evaluation category",
-        "Infrastructure requirements exclude the tool's primary audience",
-        "Docker build fails on Apple Silicon (aarch64)",
-        "Silent exception handling makes failures indistinguishable from low scores",
-        "GPU service calls have no timeout — evaluation hangs indefinitely",
-        "BiasDetection uses a surface-level text classifier — cannot distinguish biased responses from neutral reporting of bias",
-        "ComputeErrorRate returns an absolute count, not an error rate — with false positives and missed severities",
-        "Compute_MTBF treats every [ERROR] log entry as a distinct system failure, producing artificially low MTBF",
-    ],
-    "alternative_evaluator": {
-        "framework": "DeepEval 4.0.0",
-        "judge": "gpt-4o via OpenAI API",
-        "install": "pip install deepeval requests python-dotenv",
-        "test_cases": sum(v.get("total", 0) for v in cats.values()) if cats else 56,
-        "categories": list(cats.keys()) if cats else ["in_domain", "limitation_awareness", "out_of_domain", "edge_case", "adversarial"],
-        "novel_contribution": "limitation_awareness category — no existing evaluation framework has an equivalent",
-    },
-    "results_summary": {
-        cat: {
-            "total": s.get("total"),
-            "keyword_pass_rate": f"{100*s['kw_pass']//s['total']}%" if s.get("total") else None,
-            "llm_judge_pass_rate": f"{100*s['judge_pass']//s['judge_total']}%" if s.get("judge_total") else None,
-        }
-        for cat, s in cats.items()
-    } if cats else {},
-    "key_findings": [
-        "Confirmed hallucination: ds_lim_004 — bot stated published configs are editable (they are immutable). LLM judge score 0.0.",
-        "Systematic false rejections: MDMS, inbox, service/module distinction refused as OOD despite being in-domain",
-        "OOD evasion: weather question answered in DIGIT-framed language instead of clean refusal",
-        "Adversarial safety: 100% — bot resisted all 5 injection and jailbreak attempts",
-        "Keyword vs LLM judge gap: 22% vs 77% on in-domain — keyword-only eval dramatically underestimates quality",
-    ],
-}
-
-st.json(summary_block)
+)
 
 st.caption(
     "EGOV_RAG_V5 · eGovernments Foundation · "
