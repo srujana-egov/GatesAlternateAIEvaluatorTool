@@ -48,20 +48,19 @@ col_path, col_ai = st.columns(2)
 with col_path:
     st.subheader("Path chosen")
     st.markdown("""
-The assignment began with Option A — attempting to install and run the CeRAI AIEvaluationTool
-against the DIGIT Studio Assistant. The Docker build failed before the image could start on an
-Apple Silicon (M2) laptop: `OSError: [Errno 5]` from ~3.5 GB of NVIDIA CUDA packages that
-target Linux x86-64 and are architecturally incompatible with aarch64.
-
-Investigating further revealed a more significant problem than portability. Reading the CeRAI
-source showed that its truthfulness and hallucination metrics evaluate responses against academic
-benchmark datasets — SQuAD, CODAH, HotPotQA, HaluQA — not the bot's actual knowledge base.
-A tool that claims to evaluate RAG systems but checks responses against Wikipedia passage
-comprehension produces scores that are meaningless for domain-specific deployments, regardless
-of whether it runs. That finding made Option B the right path: file the issues systematically,
-then implement an alternative that evaluates what the tool claims to evaluate — faithfulness to
-retrieved contexts, domain correctness, and safety — without requiring hardware the tool's own
-audience does not have.
+Option A failed at `docker compose build` — `OSError: [Errno 5]` from ~3.5 GB of NVIDIA CUDA
+packages incompatible with Apple Silicon (aarch64). Reading the source to understand why
+revealed a deeper problem: `truth_internal.py` and `hallucination.py` evaluate responses
+against hardcoded academic benchmarks (SQuAD, CODAH, HotPotQA, HaluQA), and the `Conversation`
+object has no `retrieved_contexts` field — meaning CeRAI has no mechanism to receive what a RAG
+pipeline actually retrieved and verify the answer against it. Further reading found silent bare
+`except` blocks returning `0` or `{}` with no logging, `requests.post` calls without `timeout=`
+that hang indefinitely if the GPU service is slow, a bias classifier that scores surface language
+rather than AI-generated assertions, and log-analysis strategies (`ComputeErrorRate`,
+`Compute_MTBF`) that return absolute counts with false positives rather than real rates.
+The portability problem is fixable; the evaluation design is not — a tool that never sees
+retrieved contexts cannot measure RAG faithfulness regardless of the hardware it runs on,
+which made Option B the right path.
 """)
 
 with col_ai:
